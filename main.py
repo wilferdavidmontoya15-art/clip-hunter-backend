@@ -1,38 +1,32 @@
 import os
 import subprocess
 import uuid
-import shutil # Necesario para mover/eliminar archivos temporales
+import shutil 
 from typing import Dict, Any
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-from supabase_storage import SupabaseStorage
+# CORRECCIÓN CLAVE: Importamos el cliente oficial
+from supabase import create_client 
 import yt_dlp
 
 # --- LECTURA DE VARIABLES DE ENTORNO ---
-# Estas variables se inyectan en Railway:
 SUPABASE_URL = os.environ.get("SUPABASE_URL") 
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_KEY") 
 # ----------------------------------------
 
-# Validación de entorno (Evita que la app se inicie si le faltan secretos)
-if not SUPABASE_URL or not SUPABASE_KEY:
-    print("FATAL ERROR: Las variables de entorno de Supabase no están configuradas.")
-    # Permite iniciar la app pero las rutas de Storage fallarán.
-    # En producción, usaríamos exit(1) aquí. 
-    # Por ahora, solo emitimos un warning.
-
-# Inicializa la conexión con Supabase Storage
+# Inicialización del cliente de Supabase
+storage = None
 try:
-    storage = SupabaseStorage(
-        url=SUPABASE_URL,
-        key=SUPABASE_KEY
-    )
-except Exception:
-    # Esto manejará si la URL o KEY son None al inicio
-    print("WARNING: Storage no inicializado. La ruta /api/cut fallará.")
-    storage = None # Inicializa como None para evitar errores al inicio
+    if SUPABASE_URL and SUPABASE_KEY:
+        # Crea el cliente y accede al Storage
+        supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY)
+        storage = supabase_client.storage
+    else:
+        print("WARNING: Faltan credenciales de Supabase.")
+except Exception as e:
+    print(f"WARNING: Error al conectar con Supabase: {e}")
 
 app = FastAPI()
 
@@ -57,7 +51,7 @@ class ClipRequest(BaseModel):
 
 
 ## ---------------------------------------------
-## 1. ENDPOINT: OBTENER METADATA (FUNCIÓN EXISTENTE)
+## 1. ENDPOINT: OBTENER METADATA
 ## ---------------------------------------------
 @app.post("/api/info")
 def get_video_info(request: VideoRequest) -> Dict[str, Any]:
@@ -143,21 +137,21 @@ def cut_video_and_upload(request: ClipRequest):
         # 3. SUBIR EL CLIP CORTADO A SUPABASE STORAGE
         storage_path = f"{request.file_name_prefix}-{uuid.uuid4()}.mp4"
         
+        # CORRECCIÓN: Usamos storage.from_ por el cambio de librería
         with open(final_clip_path, 'rb') as f:
-            storage.from_bucket(bucket_name).upload(
+            storage.from_(bucket_name).upload(
                 file=f,
                 path=storage_path,
                 file_options={"content-type": "video/mp4"}
             )
             
         # 4. OBTENER LA URL PÚBLICA DEL CLIP
-        public_url = storage.from_bucket(bucket_name).get_public_url(storage_path)
+        public_url = storage.from_(bucket_name).get_public_url(storage_path)
         print(f"Clip subido. URL: {public_url}")
 
         return {"status": "success", "public_url": public_url}
 
     except subprocess.CalledProcessError as e:
-        # Si FFmpeg o yt-dlp fallan, obtenemos el mensaje de error de la terminal
         print(f"ERROR EN PROCESO: {e.stderr.decode()}")
         raise HTTPException(status_code=500, detail=f"Fallo en el corte (FFmpeg/yt-dlp): {e.stderr.decode()[:100]}")
         

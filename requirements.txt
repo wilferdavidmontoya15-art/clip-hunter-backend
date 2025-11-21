@@ -1,4 +1,6 @@
 fastapi
 uvicorn
-yt-dlp
+pydantic
 supabase
+yt-dlp
+python-multipart

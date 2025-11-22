@@ -1,0 +1,35 @@
+# Configuración para Railway
+providers = ["python"]
+
+[phases.setup]
+nixPkgs = ["ffmpeg", "python3"]
+
+[phases.install]
+cmds = ["pip install -r requirements.txt"]
+
+[start]
+cmd = "uvicorn main:app --host 0.0.0.0 --port $PORT"
+```
+*(Nota: Ajusta el comando de `[start]` si tu archivo principal no se llama `main.py` o si no usas uvicorn, pero la parte clave aquí es `nixPkgs = ["ffmpeg"]`).*
+
+---
+
+### Opción Alternativa: Si usas Dockerfile
+
+Si en tu backend ya tienes un archivo llamado `Dockerfile`, **no** crees el `nixpacks.toml`. En su lugar, edita tu `Dockerfile` y agrega la instalación de FFmpeg.
+
+Debería verse algo así (ejemplo para Python):
+
+```dockerfile
+FROM python:3.9-slim
+
+# --- AGREGA ESTAS LÍNEAS PARA INSTALAR FFMPEG ---
+RUN apt-get update && \
+    apt-get install -y ffmpeg && \
+    rm -rf /var/lib/apt/lists/*
+# ------------------------------------------------
+
+WORKDIR /app
+COPY . .
+RUN pip install -r requirements.txt
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]

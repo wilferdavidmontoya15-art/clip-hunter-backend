@@ -1,14 +1,18 @@
 import { useState, useEffect, useMemo } from 'react';
-import { supabase } from '../supabaseClient'; 
+import { supabase } from '../supabaseClient.js'; // Agregamos .js para ser explícitos
 import { toast } from 'react-hot-toast'; 
 
-// Usamos la variable de entorno, o el fallback (tu URL de Railway)
-// IMPORTANTE: Forzamos HTTPS para evitar bloqueos de "Mixed Content"
-const API_URL = (import.meta.env.VITE_API_URL || "https://clip-hunter-backend-production.up.railway.app").replace('http://', 'https://');
+// 1. Configuración segura de la URL (Fuerza HTTPS y maneja import.meta)
+const getApiUrl = () => {
+    const url = import.meta.env.VITE_API_URL || "https://clip-hunter-backend-production.up.railway.app";
+    return url.replace('http://', 'https://');
+};
+
+const API_URL = getApiUrl();
 
 export const EMOTIONS = ['Comedia', 'Drama', 'Acción', 'Feliz', 'Triste', 'Épico', 'Tensa', 'General'];
 
-// Helper para esperar (usado en reintentos)
+// Helper para esperar entre reintentos
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 const useClips = () => {
@@ -29,7 +33,7 @@ const useClips = () => {
         category: 'General'
     });
 
-    // --- 1. CARGAR CLIPS ---
+    // --- CARGAR CLIPS ---
     const fetchClips = async () => {
         setLoading(true);
         const { data, error } = await supabase
@@ -46,7 +50,7 @@ const useClips = () => {
         setLoading(false);
     };
 
-    // --- 2. LÓGICA DE FILTRADO MEJORADA (useMemo) ---
+    // --- FILTRADO OPTIMIZADO ---
     const filteredClips = useMemo(() => {
         if (!filter) return clips;
         const lowerFilter = filter.toLowerCase();
@@ -58,26 +62,24 @@ const useClips = () => {
         );
     }, [clips, filter]);
 
-
-    // --- 3. FUNCIÓN NUCLEAR: CORTAR EN RAILWAY (CON REINTENTO Y MODO SIMPLE) ---
+    // --- FUNCIÓN NUCLEAR: CORTAR EN RAILWAY (CON REINTENTO) ---
     const cutVideoOnBackend = async (videoUrl, startTime, endTime, title) => {
         const startNum = parseFloat(startTime);
         const endNum = parseFloat(endTime);
         const maxRetries = 3; 
 
+        // Bucle de intentos
         for (let attempt = 1; attempt <= maxRetries; attempt++) {
             try {
                 if (attempt > 1) {
                     console.log(`[Backend] Intento ${attempt}/${maxRetries}: Reintentando conexión...`);
-                    await sleep(1500 * (attempt - 1)); // Espera progresiva
+                    await sleep(1000 * (attempt - 1)); // Espera progresiva (0s, 1s, 2s)
                 }
 
-                // Usamos fetch con headers estándar para JSON
                 const res = await fetch(`${API_URL}/api/cut`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        'Accept': 'application/json'
                     },
                     body: JSON.stringify({
                         video_url: videoUrl,
@@ -88,44 +90,42 @@ const useClips = () => {
                 });
 
                 if (!res.ok) {
-                    // Leemos el error con cuidado
+                    // Si es un error del servidor (5xx), lanzamos error para que el bucle reintente
+                    if (res.status >= 500 && attempt < maxRetries) {
+                         throw new Error(`Error temporal del servidor (${res.status})`);
+                    }
+                    
+                    // Si es otro error, intentamos leer el mensaje
                     let errorDetail = `Error desconocido: ${res.status}`;
                     try {
                         const errData = await res.json();
                         errorDetail = errData.detail || errorDetail;
                     } catch (e) {
-                        // Si no es JSON, es un error de red crudo
-                        errorDetail = await res.text(); 
+                        errorDetail = await res.text();
                     }
-
-                    // Si es un error 500 (Server Error), reintentamos. Si es 400 (Bad Request), paramos.
-                    if (res.status >= 500 && attempt < maxRetries) {
-                         // Lanzamos error para que el catch lo capture y reintente
-                         throw new Error(`Error del servidor (${res.status}). Reintentando...`);
-                    }
-                    
-                    // Si es un error definitivo (400, 422), lanzamos error final
-                    throw new Error(errorDetail);
+                    throw new Error(errorDetail); // Rompe el bucle y va al catch final
                 }
 
                 const data = await res.json();
-                // Aseguramos HTTPS en la respuesta también
+                // Asegurar HTTPS en la respuesta
                 let fullUrl = data.public_url.startsWith('http') ? data.public_url : `${API_URL}${data.public_url}`;
                 fullUrl = fullUrl.replace('http://', 'https://');
-                return fullUrl;
+                
+                return fullUrl; // ¡Éxito! Retornamos la URL
 
             } catch (error) {
                 console.error(`[Backend] Falló el intento ${attempt}:`, error.message);
+                
+                // Si es el último intento, lanzamos el error final al usuario
                 if (attempt === maxRetries) {
-                    // Este es el error que se mostrará al usuario si todo falla
-                    throw new Error(`No se pudo conectar con el servidor de edición. Verifica tu conexión o intenta más tarde. (Detalle: ${error.message})`);
+                    throw new Error(`No se pudo conectar con el servidor. (Detalle: ${error.message})`);
                 }
+                // Si no es el último, el bucle continuará al siguiente intento
             }
         }
     };
 
-
-    // --- 4. ACCIÓN: RECORTAR UN CLIP EXISTENTE ---
+    // --- ACCIÓN: RECORTAR UN CLIP EXISTENTE ---
     const handleTrimExistingClip = async (originalClip, start, end) => {
         setIsProcessing(true);
         const toastId = toast.loading('✂️ Procesando video...');
@@ -162,7 +162,7 @@ const useClips = () => {
         }
     };
 
-    // --- 5. ACCIÓN: CREAR NUEVO CLIP DESDE CERO ---
+    // --- ACCIÓN: CREAR NUEVO CLIP DESDE CERO ---
     const handleSubmit = async (e) => {
         e.preventDefault();
         if (!newClip.video_url || !newClip.title) {
@@ -200,7 +200,7 @@ const useClips = () => {
         }
     };
 
-    // --- 6. AUTO-RELLENO INFO VIDEO ---
+    // --- AUTO-RELLENO INFO VIDEO ---
     const fetchVideoInfo = async (url) => {
         if (!url || !url.includes('http')) return;
         if (url.includes('.mp4') || url.includes('railway.app')) return;
@@ -208,7 +208,7 @@ const useClips = () => {
         const toastId = toast.loading('Analizando enlace...');
         
         try {
-            // También aseguramos HTTPS aquí
+            // Usamos también HTTPS aquí
             const infoUrl = `${API_URL}/api/info`.replace('http://', 'https://');
             
             const res = await fetch(infoUrl, {
@@ -243,7 +243,6 @@ const useClips = () => {
         setNewClip(prev => ({ ...prev, [name]: value }));
         
         if (name === 'video_url' && value.length > 10 && (value.includes('youtube') || value.includes('youtu.be'))) {
-             // Debounce manual simple
              const timeoutId = setTimeout(() => fetchVideoInfo(value), 1000);
              return () => clearTimeout(timeoutId);
         }

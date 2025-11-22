@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import ReactPlayer from 'react-player';
-import { X, Scissors, Play, RefreshCw, ChevronLeft, ChevronRight, Clock } from 'lucide-react';
+import { X, Scissors, Play, RefreshCw, ChevronLeft, ChevronRight, Clock, Share2, Download } from 'lucide-react';
+import { toast } from 'react-hot-toast';
 
 const TrimModal = ({ isOpen, onClose, clip, onTrimConfirm, isProcessing }) => {
   const playerRef = useRef(null);
@@ -27,34 +28,48 @@ const TrimModal = ({ isOpen, onClose, clip, onTrimConfirm, isProcessing }) => {
   // Cargar duración real
   const handleDuration = (d) => {
     setDuration(d);
-    const defaultEnd = clip.end_time && clip.end_time > 0 ? clip.end_time : Math.min(d, 30);
+    const defaultEnd = clip.end_time && clip.end_time > 0 ? clip.end_time : Math.min(d, 30);  // Límite legal 30 seg
     setEnd(defaultEnd);
     setIsReady(true);
+  };
+
+  // Límite legal: no permitir más de 30 seg
+  const enforceLegalLimit = (newStart, newEnd) => {
+    const clipDuration = newEnd - newStart;
+    if (clipDuration > 30) {
+      toast.error('⚠️ Máx 30 seg para uso legal (Fair Use)');
+      return false;
+    }
+    return true;
   };
 
   // Ajuste fino de tiempo (+/- 1 segundo)
   const adjustTime = (type, amount) => {
     if (type === 'start') {
       const newVal = Math.max(0, Math.min(start + amount, end - 1));
-      setStart(newVal);
-      playerRef.current.seekTo(newVal, 'seconds');
+      if (enforceLegalLimit(newVal, end)) {
+        setStart(newVal);
+        playerRef.current.seekTo(newVal, 'seconds');
+      }
     } else {
       const newVal = Math.max(start + 1, Math.min(end + amount, duration));
-      setEnd(newVal);
-      playerRef.current.seekTo(newVal, 'seconds');
+      if (enforceLegalLimit(start, newVal)) {
+        setEnd(newVal);
+        playerRef.current.seekTo(newVal, 'seconds');
+      }
     }
     setIsPlaying(false);
   };
 
   const handleConfirm = () => {
-    if (onTrimConfirm) {
+    if (onTrimConfirm && enforceLegalLimit(start, end)) {
       setIsPlaying(false);
       onTrimConfirm(clip, start, end);
     }
   };
 
   const previewCut = () => {
-    if (playerRef.current) {
+    if (playerRef.current && enforceLegalLimit(start, end)) {
       playerRef.current.seekTo(start, 'seconds');
       setIsPlaying(true);
       setTimeout(() => {
@@ -68,6 +83,21 @@ const TrimModal = ({ isOpen, onClose, clip, onTrimConfirm, isProcessing }) => {
     const min = Math.floor(seconds / 60);
     const sec = Math.floor(seconds % 60);
     return `${min}:${sec < 10 ? '0' : ''}${sec}`;
+  };
+
+  // Share viral
+  const handleShare = () => {
+    const shareText = `Mira este clip viral que recorté en ClipHunter – 100% legal! ${clip.title}`;
+    if (navigator.share) {
+      navigator.share({
+        title: clip.title,
+        text: shareText,
+        url: window.location.origin + `/clip/${clip.id}`  // URL corta para share
+      });
+    } else {
+      navigator.clipboard.writeText(shareText + '\n' + window.location.origin + `/clip/${clip.id}`);
+      toast.success('URL copiada – compártela en WhatsApp/TikTok!');
+    }
   };
 
   return (
@@ -85,7 +115,7 @@ const TrimModal = ({ isOpen, onClose, clip, onTrimConfirm, isProcessing }) => {
           <div>
             <h3 className="text-lg font-bold text-white flex items-center gap-2">
               <Scissors className="text-blue-500" size={20} />
-              Editor de Clips
+              Editor de Clips – 100% Legal (Fair Use)
             </h3>
             <p className="text-xs text-slate-400 truncate max-w-md">{clip.title}</p>
           </div>
@@ -139,7 +169,11 @@ const TrimModal = ({ isOpen, onClose, clip, onTrimConfirm, isProcessing }) => {
                   type="range" min={0} max={duration} step={0.1} value={start}
                   onChange={(e) => {
                     const val = parseFloat(e.target.value);
-                    if (val < end) { setStart(val); playerRef.current.seekTo(val, 'seconds'); setIsPlaying(false); }
+                    if (val < end) { 
+                      setStart(val); 
+                      playerRef.current.seekTo(val, 'seconds'); 
+                      setIsPlaying(false); 
+                    }
                   }}
                   className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
                 />
@@ -159,7 +193,11 @@ const TrimModal = ({ isOpen, onClose, clip, onTrimConfirm, isProcessing }) => {
                   type="range" min={0} max={duration} step={0.1} value={end}
                   onChange={(e) => {
                     const val = parseFloat(e.target.value);
-                    if (val > start) { setEnd(val); playerRef.current.seekTo(val, 'seconds'); setIsPlaying(false); }
+                    if (val > start) { 
+                      setEnd(val); 
+                      playerRef.current.seekTo(val, 'seconds'); 
+                      setIsPlaying(false); 
+                    }
                   }}
                   className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-purple-500"
                   style={{ accentColor: '#a855f7' }} // Color morado para diferenciar
@@ -179,6 +217,20 @@ const TrimModal = ({ isOpen, onClose, clip, onTrimConfirm, isProcessing }) => {
                  <span className="text-xl font-bold text-white font-mono">{(end - start).toFixed(1)}s</span>
               </div>
 
+              {/* Disclaimer Legal */}
+              <div className="bg-yellow-900/20 border border-yellow-800/50 rounded-lg p-3 text-xs text-yellow-300">
+                <p><strong>Legal:</strong> Máx 30 seg para uso personal/educativo (Fair Use). No compartas contenido protegido sin permiso.</p>
+              </div>
+
+              {/* Botón Share Viral */}
+              <button 
+                onClick={handleShare}
+                className="w-full bg-green-600 hover:bg-green-500 text-white py-3 rounded-xl flex items-center justify-center gap-2 font-medium transition-all shadow-lg shadow-green-600/20"
+              >
+                <Share2 size={18} />
+                Compartir Viral (WhatsApp/TikTok)
+              </button>
+
             </div>
 
             {/* Footer Acciones */}
@@ -193,10 +245,10 @@ const TrimModal = ({ isOpen, onClose, clip, onTrimConfirm, isProcessing }) => {
 
                <button
                 onClick={handleConfirm}
-                disabled={isProcessing || !isReady || (end - start) <= 0.5}
+                disabled={isProcessing || !isReady || (end - start) <= 0.5 || (end - start) > 30}
                 className={`
                   w-full flex items-center justify-center gap-2 py-3.5 rounded-xl font-bold text-sm transition-all shadow-lg
-                  ${isProcessing || !isReady
+                  ${isProcessing || !isReady || (end - start) <= 0.5 || (end - start) > 30
                     ? 'bg-slate-800 text-slate-500 cursor-not-allowed' 
                     : 'bg-blue-600 hover:bg-blue-500 text-white shadow-blue-900/20 active:scale-95'}
                 `}
@@ -204,6 +256,19 @@ const TrimModal = ({ isOpen, onClose, clip, onTrimConfirm, isProcessing }) => {
                 <RefreshCw size={18} className={isProcessing ? "animate-spin" : ""} />
                 {isProcessing ? 'Procesando...' : '✂️ Confirmar y Descargar'}
               </button>
+
+              {/* Anuncio Rentable */}
+              <div className="text-center py-4">
+                <p className="text-xs text-slate-500 mb-2">Patrocinado</p>
+                <ins className="adsbygoogle" 
+                  style={{ display: 'block', width: '100%', height: '60px' }} 
+                  data-ad-client="ca-pub-XXXXXXX"  // Tu ID de AdSense
+                  data-ad-slot="XXXXXXXXX" 
+                  data-ad-format="auto" 
+                  data-full-width-responsive="true">
+                </ins>
+                <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-XXXXXXX" crossOrigin="anonymous"></script>
+              </div>
             </div>
           </div>
         </div>
